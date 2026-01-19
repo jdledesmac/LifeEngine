@@ -17,12 +17,15 @@ class Engine:
     def run(self):
         while self.running:
             # Calcular Delta Time (dt)
-            dt = self.clock.tick(60) / 1000.0
+            dt = self.clock.tick(10) / 1000.0
             
             # Input
             self.input_manager.update()
             if self.input_manager.quit_requested:
+                print("Quit requested by InputManager")
                 self.running = False
+            
+            # print(f"Looping... dt={dt}", end='\r') # Debug
             
             # Update
             for obj in self.objects:

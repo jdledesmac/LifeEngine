@@ -2,11 +2,13 @@ class Cell:
     def __init__(self, genoma):
         self.genoma = genoma
         self.chemistry = {}
-        self.energy = 10 
+        self.energy = 20 
         self.age = 0
         self.alive=True
         self.ready_to_divide = False
         self.division_cooldown = 0
+        self.x = None
+        self.y = None
     
     def step(self):
         self.ready_to_divide = False
@@ -17,7 +19,7 @@ class Cell:
         self.metabolize()
         self.assess_state()
         
-        
+     
         
     def dissipate(self):
         self.energy -= 0.1 + 0.0001*self.age
@@ -39,7 +41,8 @@ class Cell:
         if self.energy < 0:
             self.alive = False
             return
-        if self.energy > 5 and self.total_chemistry() > 8:
+        # Division threshold: "2 pixels" worth of mass (10 per pixel approx)
+        if self.total_chemistry() >= 20 and self.energy > 5:
             self.ready_to_divide = True
 
     def total_chemistry(self):

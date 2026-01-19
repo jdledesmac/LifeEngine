@@ -1,4 +1,7 @@
 import pygame
+import pygame
+import hashlib
+import colorsys
 
 class WorldObject:
     """
@@ -43,22 +46,36 @@ class WorldObject:
             screen (pygame.Surface): The target surface to draw onto.
         """
         # ---- Step 4: Draw the world (nutrients) ----
-        for x in range(self.world.width):
-            for y in range(self.world.height):
-                chem = self.world.grid[x][y]
+        for x in range(self.world.cols):
+            for y in range(self.world.rows):
+                chem = self.world.chemistry[x][y]
                 
-                # Visualize nutrient 'A' concentration as green intensity
-                # Scale: 20 intensity per unit, capped at 255
-                a = int(min(255, chem.get("A", 0) * 20))
-                color = (0, a, 0)
+                # Base black color
+                r, g, b = 0, 0, 0
 
-                rect = pygame.Rect(
-                    x * self.cell_size,
-                    y * self.cell_size,
-                    self.cell_size,
-                    self.cell_size
-                )
-                pygame.draw.rect(screen, color, rect)
+                # Nutrient 'A' -> Green
+                if "A" in chem:
+                    green_intensity = min(255, int(chem["A"] * 20))
+                    g = min(255, g + green_intensity)
+                
+                # Waste 'B' -> Brown (139, 69, 19)
+                if "B" in chem:
+                    brown_factor = min(1.0, chem["B"] * 0.5) # Scale factor based on amount
+                    # Add brown components
+                    r = min(255, r + int(139 * brown_factor))
+                    g = min(255, g + int(69 * brown_factor)) # Note: green channel overlaps
+                    b = min(255, b + int(19 * brown_factor))
+
+                color = (r, g, b)
+
+                if r > 0 or g > 0 or b > 0:
+                    rect = pygame.Rect(
+                        x * self.cell_size,
+                        y * self.cell_size,
+                        self.cell_size,
+                        self.cell_size
+                    )
+                    pygame.draw.rect(screen, color, rect)
 
         # ---- Step 5: Draw the cells ----
         # Iterate through all cells in the world and draw the living ones
@@ -66,21 +83,56 @@ class WorldObject:
             if not cell.alive:
                 continue
 
-            # Calculate center position based on grid coordinates
-            cx = cell.x * self.cell_size + self.cell_size // 2
-            cy = cell.y * self.cell_size + self.cell_size // 2
+            # Color based on genome hash
+            color = self.get_cell_color(cell)
+
             
-            # Radius depends on energy level, minimum 2 pixels
-            mass = sum(cell.chemistry.values())
-            radius = max(2, int(mass))
-            energy_color=min(255, int(cell.energy*20))
-            color=(energy_color, energy_color, 255)
+            rect = pygame.Rect(
+                cell.x * self.cell_size,
+                cell.y * self.cell_size,
+                self.cell_size,
+                self.cell_size
+            )
+            pygame.draw.rect(screen, color, rect)
+            
+        # ---- Step 6: Draw UI Dashboard ----
+        self.draw_ui(screen)
 
-            pygame.draw.circle(screen, color, (cx, cy), radius)
+    def get_cell_color(self, cell):
+        """
+        Generates a neon color based on the cell's genome using HSV.
+        """
+        # Create a unique string signature
+        genome_str = str(cell.genoma)
+        
+        # Hash it (using md5 for decent distribution)
+        hash_obj = hashlib.md5(genome_str.encode())
+        hex_dig = hash_obj.hexdigest()
+        
+        # Use part of the hash to determine Hue (0.0 to 1.0)
+        # We take first 4 hex chars -> 16 bits -> 0 to 65535
+        # Normalize to 0-1
+        hue_int = int(hex_dig[:4], 16)
+        hue = hue_int / 65535.0
+        
+        # Saturation and Value high for "Neon" look
+        saturation = 0.9
+        value = 0.9
+        
+        # Convert HSV to RGB
+        r_float, g_float, b_float = colorsys.hsv_to_rgb(hue, saturation, value)
+        
+        # Scale to 0-255
+        r = int(r_float * 255)
+        g = int(g_float * 255)
+        b = int(b_float * 255)
+        
+        return (r, g, b)
 
+    def draw_ui(self, screen):
         # ---- Step 6: Draw UI Dashboard ----
         # Draw background panel
-        ui_y = self.world.height * self.cell_size
+        ui_y = self.world.rows * self.cell_size
         ui_rect = pygame.Rect(0, ui_y, screen.get_width(), 100)
         pygame.draw.rect(screen, (30, 30, 30), ui_rect)
         
@@ -102,7 +154,7 @@ class WorldObject:
             # Division status safe access
             div_status = "YES" if getattr(cell, 'ready_to_divide', False) else "NO"
             
-            info = f"Cell #{i}: E={cell.energy:.1f} | Age={cell.age} | Chem={{ {chem_str} }} | Div={div_status}"
+            info = f"Cell #{i}: E={cell.energy:.1f} | Age={cell.age} | Chem={{ {chem_str} }}"
             detail_text = self.font.render(info, True, (200, 200, 200))
             screen.blit(detail_text, (20, ui_y + y_offset))
             y_offset += 20
