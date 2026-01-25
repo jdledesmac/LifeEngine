@@ -7,18 +7,18 @@ class Cell:
         self.alive=True
         self.ready_to_divide = False
         self.division_cooldown = 0
-        self.x = None
+        self.x = None   
         self.y = None
+        
     
     def step(self):
         self.ready_to_divide = False
         if not self.alive:
             return
-        self.age += 1
         self.dissipate()
         self.metabolize()
         self.assess_state()
-        
+        self.age += 1
      
         
     def dissipate(self):
@@ -38,6 +38,7 @@ class Cell:
         if self.division_cooldown > 0:
             self.division_cooldown -= 1
             return
+
         if self.energy < 0:
             self.alive = False
             return

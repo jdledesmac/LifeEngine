@@ -20,14 +20,14 @@ class Genoma:
 
         # 1. Point Mutation (Most common)
         for gene in self.genes:
-            if random.random() < 0.1: # 10% chance per gene to tweak cost
+            if random.random() < 0.05: # 5% chance per gene to tweak cost
                  gene.cost = max(0.1, gene.cost + random.uniform(-0.1, 0.1))
             
-            if random.random() < 0.1: # 10% chance per gene to tweak prob
+            if random.random() < 0.01: # 10% chance per gene to tweak prob
                 gene.prob = min(1.0, max(0.1, gene.prob + random.uniform(-0.1, 0.1)))
 
         # 2. Gene Duplication (Rare)
-        if random.random() < 0.05: # 5% chance
+        if random.random() < 0.01: # 1% chance
             target = random.choice(self.genes)
             # Create a shallow copy (or deep if needed, but new instance is safer)
             import copy
@@ -35,5 +35,5 @@ class Genoma:
             self.genes.append(new_gen)
 
         # 3. Gene Deletion (Very Rare, dangerous)
-        if len(self.genes) > 1 and random.random() < 0.02: # 2% chance
+        if len(self.genes) > 1 and random.random() < 0.01: # 1% chance
             self.genes.pop(random.randint(0, len(self.genes)-1))
