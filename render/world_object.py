@@ -50,69 +50,66 @@ class WorldObject:
         # ---- Step 4: Draw Background ----
         screen.fill(self.bg_color)
 
-        # ---- Step 5: Draw Nutrients (Subtle additive) ----
-        # To avoid massive loop overhead, we only iterate where logical. 
-        # But for strictly correct grid rendering, we iterate. 
-        # For optimization, we rely on the fact that empty space is common? 
-        # Actually, in this sim, diffusion spreads things everywhere. 
-        # We will iterate, but keep math simple.
-        
+        # ---- Step 5: Draw Chemicals (Mixed) ----
+        # Mix Nutrients (A) and Waste (B)
         chem_A = self.world.chemistry.get("A")
         chem_B = self.world.chemistry.get("B")
-        
-        # Optimization: Create a surface for nutrients if performance hits, but for now direct draw.
-        # We will only draw if concentration is significant (> 0.1) to save calls.
-        
-        rows = self.world.rows
-        cols = self.world.cols
-        cell_size = self.cell_size
-        
-        # We can scan the arrays in numpy to find indices > threshold, but that might be complex to wire to rects efficiently in Pygame without blit_array.
-        # Let's stick to the double loop but optimize checks.
-        
-        # Draw "plankton" (A) - Cyan/Greenish
-        if chem_A is not None:
-            # Vectorized index finding? 
-            # indices = np.argwhere(chem_A > 0.5) 
-            # This is much faster than python loop for sparse data.
-            # For dense data, blit_array is better. Let's try argwhere for now as nutrients might be clumpy.
-            
-            indices = np.argwhere(chem_A > 0.5)
-            for x, y in indices:
-                val = chem_A[x, y]
-                # Alpha simulation: blend with bg
-                # Ocean (20, 40, 60) + Green (0, 255, 100) * val
-                intensity = min(1.0, val / 20.0)
-                
-                # Simple additive tint
-                color = (
-                    min(255, 20 + int(0 * intensity)),
-                    min(255, 40 + int(100 * intensity)),
-                    min(255, 60 + int(60 * intensity))
-                )
-                if intensity > 0.05:
-                     pygame.draw.rect(screen, color, (x*cell_size, y*cell_size, cell_size, cell_size))
 
-        # Draw "waste" (B) - Murky Purple
-        if chem_B is not None:
-             indices = np.argwhere(chem_B > 0.5)
-             for x, y in indices:
-                val = chem_B[x, y]
-                # Waste 'B' - High Contrast Rust/Orange (Sediment)
-                if val > 0.05: # Lower threshold
-                    # Much higher sensitivity: divide by 2.0 instead of 20.0 so we see small amounts
-                    intensity = min(1.0, val / 2.0) 
-                    
-                    # Bright Rust/Orange: (220, 100, 50)
-                    # We want it to be visible even at low intensity.
-                    # Base color (visible brown) + intensity brightness
-                    color = (
-                        min(255, 100 + int(155 * intensity)), 
-                        min(255, 50 + int(100 * intensity)),
-                        min(255, 20 + int(50 * intensity))
-                    )
-                    
-                    pygame.draw.rect(screen, color, (x*cell_size, y*cell_size, cell_size, cell_size))
+        if chem_A is not None or chem_B is not None:
+            # Create zero grids if they don't exist
+            if chem_A is None: chem_A = np.zeros((self.world.cols, self.world.rows))
+            if chem_B is None: chem_B = np.zeros((self.world.cols, self.world.rows))
+
+            # Threshold to display
+            threshold = 0.05
+            
+            # Find indices where there is something to draw
+            # Use 'or' logic: (A > t) | (B > t)
+            active_indices = np.argwhere((chem_A > threshold) | (chem_B > threshold))
+            
+            for x, y in active_indices:
+                val_a = chem_A[x, y]
+                val_b = chem_B[x, y]
+                
+                total = val_a + val_b
+                if total <= 0: continue
+                
+                # Ratios
+                ratio_a = val_a / total
+                ratio_b = val_b / total
+                
+                # Base Colors
+                # Nutrient: Brilliant Blue/Cyan (0, 200, 255)
+                # Waste: Brown/Rust (160, 82, 45)
+                
+                # Mix colors
+                r = ratio_a * 0   + ratio_b * 160
+                g = ratio_a * 200 + ratio_b * 82
+                b = ratio_a * 255 + ratio_b * 45
+                
+                # Intensity/Brightness based on total concentration.
+                # Adjust scale factor so common amounts look good.
+                # Assuming max concentrations around 20-50 usually?
+                intensity = min(1.0, total / 20.0)
+                
+                # Apply intensity to blend with background or simply scale the color
+                # If we want "opaque" for low concentration, we might just reduce brightness.
+                # Let's map 0..1 intensity to a color scale.
+                
+                # Final color = MixedColor * Intensity + Background * (1-Intensity) ?
+                # Or just simple brightness scaling. User said "more intense or lighter".
+                # Let's try simple additive-like brightness but capped.
+                
+                draw_r = int(min(255, r * (0.2 + 0.8 * intensity)))
+                draw_g = int(min(255, g * (0.2 + 0.8 * intensity)))
+                draw_b = int(min(255, b * (0.2 + 0.8 * intensity)))
+                
+                # Ensure it's not darker than background if we want it to "glow" or stand out?
+                # The background is (20, 40, 60).
+                # Let's ensure minimum visibility.
+                
+                pygame.draw.rect(screen, (draw_r, draw_g, draw_b), 
+                                 (x*self.cell_size, y*self.cell_size, self.cell_size, self.cell_size))
 
 
         # ---- Step 6: Draw Cells (Organic) ----

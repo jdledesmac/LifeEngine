@@ -1,6 +1,6 @@
 import copy
 import random
-import warnings
+
 import numpy as np
 from .cell import Cell
 
@@ -157,7 +157,53 @@ class World:
         cy = max(0, min(self.rows - 1, int(cell.y)))
         return cx, cy
 
-    def move_cell(self, cell, rate=0.05):
+    def move_cell_active(self, cell, cost=0.5):
+        """
+        Active movement (Chemotaxis).
+        Cell checks neighbors for better nutrients ("A").
+        Returns True if moved, False otherwise.
+        """
+        # 1. Inteligencia: Si hay suficiente comida aquí, no moverse (ahorrar energía)
+        cx, cy = self.cell_tile(cell)
+        current_nutrients = 0
+        if "A" in self.chemistry:
+            current_nutrients = self.chemistry["A"][cx, cy]
+        
+        # Umbral de satisfacción: Si hay > 0.5, quedarse quieto es mejor estrategia
+        if current_nutrients > 0.5:
+             return False
+
+        # 2. Buscar gradiente en vecinos
+        best_val = -1
+        best_pos = None
+        
+        candidates = [(-1,0), (1,0), (0,-1), (0,1)]
+        random.shuffle(candidates) # Randomize check order to avoid bias
+        
+        for dx, dy in candidates:
+            nx, ny = cx + dx, cy + dy
+            
+            # Bounds check
+            if 0 <= nx < self.cols and 0 <= ny < self.rows:
+                val = 0
+                if "A" in self.chemistry:
+                    val = self.chemistry["A"][nx, ny]
+                
+                # Solo considerar si es mejor que lo actual (con un pequeño margen para evitar dithering)
+                if val > current_nutrients * 1.05 and val > best_val:
+                    best_val = val
+                    best_pos = (nx, ny)
+
+        # 3. Ejecutar movimiento
+        if best_pos:
+            cell.x = best_pos[0]
+            cell.y = best_pos[1]
+            cell.energy -= cost
+            return True
+            
+        return False
+
+    def move_cell_pasive(self, cell, rate=0.05):
         if random.random() > rate:
             return
         dx, dy = random.choice([(-1,0),(1,0),(0,-1),(0,1)])
@@ -168,6 +214,7 @@ class World:
         new_y = max(0, min(self.rows-1, new_y))   
         cell.x = new_x
         cell.y = new_y
+
 
     def step(self):
         """
@@ -190,8 +237,11 @@ class World:
             if not cell.alive:
                 continue
             
-            # passive movement
-            self.move_cell(cell)
+            # 2.3 Movimiento
+            # Intento de movimiento activo
+            if not self.move_cell_active(cell):
+                 # Si no se movió activamente, usar pasivo
+                 self.move_cell_pasive(cell)
             
             # 2.3 Liberación de residuos
             self.release_waste(cell)

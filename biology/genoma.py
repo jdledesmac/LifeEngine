@@ -20,10 +20,10 @@ class Genoma:
 
         # 1. Point Mutation (Most common)
         for gene in self.genes:
-            if random.random() < 0.05: # 5% chance per gene to tweak cost
+            if random.random() < 0.08: # 8% chance per gene to tweak cost
                  gene.cost = max(0.1, gene.cost + random.uniform(-0.1, 0.1))
             
-            if random.random() < 0.01: # 10% chance per gene to tweak prob
+            if random.random() < 0.05: # 5% chance per gene to tweak prob
                 gene.prob = min(1.0, max(0.1, gene.prob + random.uniform(-0.1, 0.1)))
 
         # 2. Gene Duplication (Rare)
