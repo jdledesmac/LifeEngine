@@ -27,6 +27,13 @@ class WorldObject:
         # Pre-calculated background color
         self.bg_color = (20, 40, 60) # Deep Ocean Blue
 
+        # Chemical Colors Configuration
+        self.chem_colors = {
+            "A": (0, 200, 255),    # Cyan (Nutrient)
+            "B": (160, 82, 45),    # Brown/Rust (Waste)
+            "C": (50, 205, 50),    # Emerald Green (Exotic Nutrient)
+        }
+
     def update(self, dt):
         """
         Updates the simulation based on delta time.
@@ -50,63 +57,75 @@ class WorldObject:
         # ---- Step 4: Draw Background ----
         screen.fill(self.bg_color)
 
-        # ---- Step 5: Draw Chemicals (Mixed) ----
-        # Mix Nutrients (A) and Waste (B)
-        chem_A = self.world.chemistry.get("A")
-        chem_B = self.world.chemistry.get("B")
-
-        if chem_A is not None or chem_B is not None:
-            # Create zero grids if they don't exist
-            if chem_A is None: chem_A = np.zeros((self.world.cols, self.world.rows))
-            if chem_B is None: chem_B = np.zeros((self.world.cols, self.world.rows))
-
-            # Threshold to display
-            threshold = 0.05
+        # ---- Step 5: Draw Chemicals (Dynamic Mixing) ----
+        # Iterate over all chemicals present in the world
+        
+        # We need to blend colors.
+        # Strategy:
+        # 1. Identify active tiles (optimize by union of indices > threshold? or just iterate non-empty arrays)
+        # 2. Accumulate weighted colors.
+        
+        # For performance with 3+ chemicals, finding the union of all non-zero indices is tricky efficiently.
+        # Let's iterate over ALL grid cells? No, too slow (80x60=4800 is fine, but if 800x600=480,000 is slow).
+        # Existing logic used argwhere.
+        
+        # New approach: 
+        # Create a "Total Concentration" grid and a "Accumulated Color" grid.
+        
+        # Using numpy for speed:
+        total_conc = np.zeros((self.world.cols, self.world.rows))
+        mixed_r = np.zeros((self.world.cols, self.world.rows))
+        mixed_g = np.zeros((self.world.cols, self.world.rows))
+        mixed_b = np.zeros((self.world.cols, self.world.rows))
+        
+        has_chemicals = False
+        
+        for mol_name, grid in self.world.chemistry.items():
+            # Skip if empty (optimization)
+            if np.max(grid) < 0.01: continue
             
-            # Find indices where there is something to draw
-            # Use 'or' logic: (A > t) | (B > t)
-            active_indices = np.argwhere((chem_A > threshold) | (chem_B > threshold))
+            has_chemicals = True
+            
+            # Get color
+            base_color = self.chem_colors.get(mol_name, (200, 200, 200)) # Default Grey
+            
+            # Add to total
+            total_conc += grid
+            
+            # Accumulate weighted color components
+            # We weight purely by amount. 
+            # R_acc += amount * R_base
+            mixed_r += grid * base_color[0]
+            mixed_g += grid * base_color[1]
+            mixed_b += grid * base_color[2]
+
+        if has_chemicals:
+            # Threshold to draw
+            # Get indices where total > 0.2 (Increased to hide low-level diffusion fog)
+            active_indices = np.argwhere(total_conc > 0.2)
             
             for x, y in active_indices:
-                val_a = chem_A[x, y]
-                val_b = chem_B[x, y]
+                t = total_conc[x, y]
                 
-                total = val_a + val_b
-                if total <= 0: continue
+                # Setup normalized color
+                # If t=10, r_acc = 10*R. r_final = r_acc / t = R. Correct.
+                # If t=10 (5 A, 5 B). r_acc = 5*Ra + 5*Rb. r_final = (5Ra+5Rb)/10 = 0.5Ra + 0.5Rb. Correct.
                 
-                # Ratios
-                ratio_a = val_a / total
-                ratio_b = val_b / total
+                r = mixed_r[x,y] / t
+                g = mixed_g[x,y] / t
+                b = mixed_b[x,y] / t
                 
-                # Base Colors
-                # Nutrient: Brilliant Blue/Cyan (0, 200, 255)
-                # Waste: Brown/Rust (160, 82, 45)
+                # Intensity scaling (brightness/alpha) using t
+                # Standard: min(1.0, t / 20.0)
+                intensity = min(1.0, t / 20.0)
                 
-                # Mix colors
-                r = ratio_a * 0   + ratio_b * 160
-                g = ratio_a * 200 + ratio_b * 82
-                b = ratio_a * 255 + ratio_b * 45
+                # Apply intensity (Dim if low concentration)
+                # Formula: Color * (0.2 + 0.8 * intensity)
+                factor = 0.2 + 0.8 * intensity
                 
-                # Intensity/Brightness based on total concentration.
-                # Adjust scale factor so common amounts look good.
-                # Assuming max concentrations around 20-50 usually?
-                intensity = min(1.0, total / 20.0)
-                
-                # Apply intensity to blend with background or simply scale the color
-                # If we want "opaque" for low concentration, we might just reduce brightness.
-                # Let's map 0..1 intensity to a color scale.
-                
-                # Final color = MixedColor * Intensity + Background * (1-Intensity) ?
-                # Or just simple brightness scaling. User said "more intense or lighter".
-                # Let's try simple additive-like brightness but capped.
-                
-                draw_r = int(min(255, r * (0.2 + 0.8 * intensity)))
-                draw_g = int(min(255, g * (0.2 + 0.8 * intensity)))
-                draw_b = int(min(255, b * (0.2 + 0.8 * intensity)))
-                
-                # Ensure it's not darker than background if we want it to "glow" or stand out?
-                # The background is (20, 40, 60).
-                # Let's ensure minimum visibility.
+                draw_r = int(min(255, r * factor))
+                draw_g = int(min(255, g * factor))
+                draw_b = int(min(255, b * factor))
                 
                 pygame.draw.rect(screen, (draw_r, draw_g, draw_b), 
                                  (x*self.cell_size, y*self.cell_size, self.cell_size, self.cell_size))
@@ -133,42 +152,102 @@ class WorldObject:
 
     def get_cell_color(self, cell):
         """
-        Generates an organic color based on the cell's genome properties.
+        Generates a color based on the cell's genome "functional signature".
         
-        Properties mapping:
-        - Base: Pale Organic Green/White (Hue=0.3)
-        - High Cost (Metabolic expensive) -> Shifts hue towards Yellow/Orange (Hue decreases)
-        - High Yield (High energy output) -> Increases Brightness/Sat
-        - Number of genes -> Complexity -> Saturation?
+        Uses a fuzzy hash approach that is stable across small mutations but
+        distinguishes functionally different genomes:
+        - Genome structure (number of genes, input/output chemistry)
+        - Metabolic profile (cost/yield ranges, not exact values)
+        
+        This allows tracking evolutionary lineages without rainbow chaos.
         """
         genes = cell.genoma.genes
         if not genes:
-            return (200, 200, 200) # Dead/Empty gray
+            return (200, 200, 200)  # Dead/Empty gray
 
-        avg_cost = sum(g.cost for g in genes) / len(genes)
+        # 1. Extract functional signature (stable across small mutations)
+        signature = self._get_genome_signature(genes)
+        
+        # 2. Convert signature to deterministic color
+        import hashlib
+        sig_hash = hashlib.md5(signature.encode()).hexdigest()
+        
+        # Use first 6 hex chars for color (like web colors)
+        # Convert to HSV for better control
+        hash_int = int(sig_hash[:6], 16)
+        
+        # Map hash to hue (0-1)
+        # We want diversity but also biological plausibility
+        # Restrict to organic range: 0.05 (red-orange) to 0.65 (blue-green)
+        hue = 0.05 + (hash_int % 1000) / 1000.0 * 0.6
+        
+        # Saturation based on genome complexity (number of genes)
+        # More genes = more saturated (specialized)
+        num_genes = len(genes)
+        sat = 0.4 + min(0.5, num_genes * 0.1)
+        
+        # Value (brightness) based on average yield
         avg_yield = sum(g.energy_yield for g in genes) / len(genes)
-        
-        # Base Hue: 0.35 (Green-Cyan)
-        # Cost effect: Higher cost (e.g. 1.0) pushes hull down to 0.1 (Orange)
-        # Cost range approx 0.1 to 1.0
-        
-        hue = 0.35 - (avg_cost * 0.2) # Max shift to ~0.15
-        hue = max(0.0, min(1.0, hue))
-        
-        # Saturation: 
-        # Healthy/High Yield = More saturated? Or more white?
-        # Let's say High Yield = Brighter (Value), Lower Saturation (Glowing White)
-        # Low Yield = Dimmer
-        
-        # Yield range approx 0 to 5
-        sat = 0.6 - (avg_yield * 0.05)
-        sat = max(0.2, min(1.0, sat))
-        
-        val = 0.7 + (avg_yield * 0.05)
-        val = max(0.4, min(1.0, val))
+        val = 0.6 + min(0.3, avg_yield * 0.06)
         
         r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
         return (int(r*255), int(g*255), int(b*255))
+    
+    def _get_genome_signature(self, genes):
+        """
+        Creates a fuzzy functional signature of the genome.
+        
+        Captures essence without being sensitive to small mutations:
+        - Number of genes (bucketed)
+        - Input chemistry types
+        - Output chemistry types  
+        - Metabolic profile (cost/yield ranges)
+        """
+        # 1. Gene count bucket (1, 2-3, 4-5, 6+)
+        num_genes = len(genes)
+        if num_genes == 1:
+            gene_bucket = "1"
+        elif num_genes <= 3:
+            gene_bucket = "2-3"
+        elif num_genes <= 5:
+            gene_bucket = "4-5"
+        else:
+            gene_bucket = "6+"
+        
+        # 2. Collect all input/output molecule types (sorted for consistency)
+        inputs = set()
+        outputs = set()
+        for gene in genes:
+            inputs.update(gene.input.keys())
+            outputs.update(gene.output.keys())
+        
+        input_sig = ",".join(sorted(inputs)) if inputs else "none"
+        output_sig = ",".join(sorted(outputs)) if outputs else "none"
+        
+        # 3. Metabolic profile (bucketed averages)
+        avg_cost = sum(g.cost for g in genes) / len(genes)
+        avg_yield = sum(g.energy_yield for g in genes) / len(genes)
+        
+        # Bucket costs: low (<0.3), medium (0.3-0.6), high (>0.6)
+        if avg_cost < 0.3:
+            cost_bucket = "low"
+        elif avg_cost < 0.6:
+            cost_bucket = "med"
+        else:
+            cost_bucket = "high"
+        
+        # Bucket yields: low (<1), medium (1-2.5), high (>2.5)
+        if avg_yield < 1.0:
+            yield_bucket = "low"
+        elif avg_yield < 2.5:
+            yield_bucket = "med"
+        else:
+            yield_bucket = "high"
+        
+        # Combine into signature string
+        signature = f"{gene_bucket}|in:{input_sig}|out:{output_sig}|cost:{cost_bucket}|yield:{yield_bucket}"
+        return signature
+
 
     def draw_ui(self, screen):
         # Draw background panel
@@ -191,8 +270,13 @@ class WorldObject:
             # Division status safe access
             div_status = "YES" if getattr(cell, 'ready_to_divide', False) else "NO"
             
+            # Format chemistry for display (rounded to 1 decimal)
+            chem_str = ", ".join([f"{mol}:{amt:.1f}" for mol, amt in list(cell.chemistry.items())[:3]])
+            if len(cell.chemistry) > 3:
+                chem_str += "..."
+            
             # Simple stats for UI
-            info = f"Cell #{i}: E={cell.energy:.1f} | Age={cell.age}"
+            info = f"Cell #{i}: E={cell.energy:.1f} | Age={cell.age} | ID={cell.genoma.get_hash()} | Chem=[{chem_str}]"
             detail_text = self.font.render(info, True, (150, 180, 200))
             screen.blit(detail_text, (20, ui_y + y_offset))
             y_offset += 20

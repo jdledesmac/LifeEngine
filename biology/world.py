@@ -125,31 +125,49 @@ class World:
             self.chemistry[mol] = grid * (1 - rate) + (neighbor_sum * rate / 4)
             
     
-    def exchange(self, cell, rate=0.5):
+    def get_local_chemistry(self, x, y):
         """
-        Handles the exchange of chemicals between a cell and its environment.
-        """
-        cx, cy = self.cell_tile(cell)
+        Returns the chemistry at a specific grid position.
         
-        # Iterate over all available molecules in the world
-        for mol in self.chemistry:
-            env_amt = self.chemistry[mol][cx, cy]
-            if env_amt > 0:
-                taken = env_amt * rate
-                cell.chemistry[mol] = cell.chemistry.get(mol, 0) + taken
-                self.chemistry[mol][cx, cy] -= taken
-
-    def release_waste(self, cell):
+        Args:
+            x (int): Grid x coordinate.
+            y (int): Grid y coordinate.
+            
+        Returns:
+            dict: Chemistry at that position.
         """
-        Moves waste products from the cell to the environment.
+        result = {}
+        for mol, grid in self.chemistry.items():
+            result[mol] = grid[x, y]
+        return result
+    
+    def get_neighbors_chemistry(self, x, y):
         """
-        cx, cy = self.cell_tile(cell)
+        Returns chemistry of the 4 neighboring positions.
         
-        # Release 'B' as it is toxic
-        if "B" in cell.chemistry:
-            amount = cell.chemistry.pop("B")
-            self._ensure_molecule("B")
-            self.chemistry["B"][cx, cy] += amount
+        Args:
+            x (int): Grid x coordinate.
+            y (int): Grid y coordinate.
+            
+        Returns:
+            dict: Chemistry at neighbors with keys 'N', 'S', 'E', 'W'.
+        """
+        neighbors = {}
+        directions = {
+            'N': (0, -1),
+            'S': (0, 1),
+            'E': (1, 0),
+            'W': (-1, 0)
+        }
+        
+        for dir_name, (dx, dy) in directions.items():
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < self.cols and 0 <= ny < self.rows:
+                neighbors[dir_name] = self.get_local_chemistry(nx, ny)
+            else:
+                neighbors[dir_name] = {}  # Out of bounds
+        
+        return neighbors
 
     def cell_tile(self, cell):
         # Clamp to ensure we don't index out of bounds if cell moves out
@@ -157,102 +175,123 @@ class World:
         cy = max(0, min(self.rows - 1, int(cell.y)))
         return cx, cy
 
-    def move_cell_active(self, cell, cost=0.5):
+    def execute_actions(self, actions_by_cell):
         """
-        Active movement (Chemotaxis).
-        Cell checks neighbors for better nutrients ("A").
-        Returns True if moved, False otherwise.
+        Executes all cell actions with conflict resolution (first-come-first-served).
+        
+        Args:
+            actions_by_cell (dict): Mapping of Cell -> list[CellAction].
         """
-        # 1. Inteligencia: Si hay suficiente comida aquí, no moverse (ahorrar energía)
+        from .action import CellAction
+        
+        for cell, actions in actions_by_cell.items():
+            if not cell.alive:
+                continue
+            
+            for action in actions:
+                if action.type == CellAction.ABSORB:
+                    self._execute_absorb(cell, action)
+                elif action.type == CellAction.RELEASE:
+                    self._execute_release(cell, action)
+                elif action.type == CellAction.MOVE:
+                    self._execute_move(cell, action)
+    
+    def _execute_absorb(self, cell, action):
+        """Executes an absorption action."""
+        molecule = action.params['molecule']
+        amount = action.params['amount']
+        
         cx, cy = self.cell_tile(cell)
-        current_nutrients = 0
-        if "A" in self.chemistry:
-            current_nutrients = self.chemistry["A"][cx, cy]
+        self._ensure_molecule(molecule)
         
-        # Umbral de satisfacción: Si hay > 0.5, quedarse quieto es mejor estrategia
-        if current_nutrients > 0.5:
-             return False
-
-        # 2. Buscar gradiente en vecinos
-        best_val = -1
-        best_pos = None
+        # Check availability
+        available = self.chemistry[molecule][cx, cy]
+        actual_amount = min(amount, available)
         
-        candidates = [(-1,0), (1,0), (0,-1), (0,1)]
-        random.shuffle(candidates) # Randomize check order to avoid bias
+        if actual_amount > 0:
+            # Cell absorbs (with energy cost)
+            absorbed = cell.absorb(molecule, actual_amount)
+            # Remove from environment
+            self.chemistry[molecule][cx, cy] -= absorbed
+    
+    def _execute_release(self, cell, action):
+        """Executes a release action."""
+        molecule = action.params['molecule']
+        amount = action.params['amount']
         
-        for dx, dy in candidates:
-            nx, ny = cx + dx, cy + dy
-            
-            # Bounds check
-            if 0 <= nx < self.cols and 0 <= ny < self.rows:
-                val = 0
-                if "A" in self.chemistry:
-                    val = self.chemistry["A"][nx, ny]
-                
-                # Solo considerar si es mejor que lo actual (con un pequeño margen para evitar dithering)
-                if val > current_nutrients * 1.05 and val > best_val:
-                    best_val = val
-                    best_pos = (nx, ny)
-
-        # 3. Ejecutar movimiento
-        if best_pos:
-            cell.x = best_pos[0]
-            cell.y = best_pos[1]
-            cell.energy -= cost
-            return True
-            
-        return False
-
-    def move_cell_pasive(self, cell, rate=0.05):
-        if random.random() > rate:
-            return
-        dx, dy = random.choice([(-1,0),(1,0),(0,-1),(0,1)])
+        cx, cy = self.cell_tile(cell)
+        self._ensure_molecule(molecule)
+        
+        # Cell releases
+        released = cell.release(molecule, amount)
+        
+        if released > 0:
+            # Add to environment
+            self.chemistry[molecule][cx, cy] += released
+    
+    def _execute_move(self, cell, action):
+        """Executes a movement action."""
+        direction = action.params['direction']
+        cost = action.params.get('cost', 0)
+        
+        dx, dy = direction
         new_x = cell.x + dx
         new_y = cell.y + dy
-        # world limits
-        new_x = max(0, min(self.cols-1, new_x))
-        new_y = max(0, min(self.rows-1, new_y))   
+        
+        # Bounds check
+        new_x = max(0, min(self.cols - 1, new_x))
+        new_y = max(0, min(self.rows - 1, new_y))
+        
         cell.x = new_x
         cell.y = new_y
+        cell.energy -= cost
 
 
     def step(self):
         """
-        advances the world state by one step.
+        Advances the world state by one step using agent-based execution model.
+        
+        Phase 1: Physics (diffusion)
+        Phase 2: Cell observation & decision-making
+        Phase 3: Action execution (with conflict resolution)
+        Phase 4: Internal processes & consequences (death, division)
         """
-        # world changes
+        # Phase 1: Physics
         self.diffuse()
-
-        new_cells = []
-
-        # cell reacts to world 
+        
+        # Phase 2: Cell observation & decision-making
+        actions_by_cell = {}
         for cell in self.cells:
-            # 2.1 Intercambio
-            self.exchange(cell)
-
-            # 2.2 Metabolismo interno
-            cell.step()
-            
-            # Si murió, se elimina
             if not cell.alive:
                 continue
             
-            # 2.3 Movimiento
-            # Intento de movimiento activo
-            if not self.move_cell_active(cell):
-                 # Si no se movió activamente, usar pasivo
-                 self.move_cell_pasive(cell)
+            cx, cy = self.cell_tile(cell)
+            env_chemistry = self.get_local_chemistry(cx, cy)
+            neighbors_chemistry = self.get_neighbors_chemistry(cx, cy)
             
-            # 2.3 Liberación de residuos
-            self.release_waste(cell)
+            actions = cell.decide_actions(env_chemistry, neighbors_chemistry)
+            actions_by_cell[cell] = actions
+        
+        # Phase 3: Execute actions
+        self.execute_actions(actions_by_cell)
+        
+        # Phase 4: Internal processes & consequences
+        new_cells = []
+        for cell in self.cells:
+            # Internal processes: dissipate, assess_state, age
+            cell.step()
             
-            # 2.4 División
+            # Remove dead cells
+            if not cell.alive:
+                continue
+            
+            # Division
             if cell.ready_to_divide:
                 daughters = self.divide_cell(cell)
                 new_cells.extend(daughters)
             else:
                 new_cells.append(cell)
-
+        
         self.cells = new_cells
 
     def divide_cell(self, cell):

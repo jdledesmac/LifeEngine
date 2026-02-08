@@ -4,8 +4,17 @@ class Genoma:
     def __init__(self, genes):
         self.genes = genes  
 
+    def get_hash(self):
+        """Returns a short unique hash of the genome configuration."""
+        import hashlib
+        # Sort gene IDs to ensure that order (if commutative) doesn't change hash
+        # though order usually matters for execution, let's keep it sorted for "identity"
+        gene_ids = sorted([g.get_id() for g in self.genes])
+        combined_id = "|".join(gene_ids)
+        return hashlib.md5(combined_id.encode()).hexdigest()[:6].upper()
+
     def __repr__(self):
-        return f"Genoma(genes={[str(g) for g in self.genes]})"
+        return f"Genoma(id={self.get_hash()}, genes={[str(g) for g in self.genes]})"
     
     def mutate(self, gen_pool=None):
         """
@@ -27,7 +36,7 @@ class Genoma:
                 gene.prob = min(1.0, max(0.1, gene.prob + random.uniform(-0.1, 0.1)))
 
         # 2. Gene Duplication (Rare)
-        if random.random() < 0.01: # 1% chance
+        if random.random() < 0.05: # % chance
             target = random.choice(self.genes)
             # Create a shallow copy (or deep if needed, but new instance is safer)
             import copy
