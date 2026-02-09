@@ -1,98 +1,75 @@
 import random
 
+def bit_count(n):
+    return bin(n).count('1')
+
 class Gen:
     """
-    Represents a gene that defines a specific metabolic reaction.
+    Represents a Digital Enzyme (Gene) defined by a bitmask.
     
-    A gene takes certain chemical inputs, consumes energy, and produces chemical outputs
-    based on a certain probability. It also defines environmental tolerances for the cell.
+    Metabolism Logic (8-Bit Alchemy):
+    - Reaction: Input & Mask
+    - Energy Gain: bit_count(Reaction) * 20
+    - Waste: Input XOR Reaction
+    - Cost: Base + (Complexity * Factor)
     """
-    def __init__(self, input, output, cost, prob, energy_yield=0, tolerance=None):
+    def __init__(self, mask, cost_base=10, cost_per_bit=2):
         """
-        Initializes a new Gen instance.
-
+        Initializes a Digital Gene.
+        
         Args:
-            input (dict): A dictionary mapping chemical names to the quantity required.
-            output (dict): A dictionary mapping chemical names to the quantity produced.
-            cost (float): The energy cost required to attempt the reaction.
-            prob (float): The probability (0 to 1) that the reaction will succeed if attempted.
-            energy_yield (float, optional): The energy produced by the reaction if successful. Defaults to 0.
-            tolerance (dict, optional): A dictionary of environmental tolerances (e.g., temperature, pH).
-                                       Defaults to an empty dictionary.
+            mask (int): 8-bit integer acting as the enzyme shape.
+            cost_base (int): Base metabolic cost.
+            cost_per_bit (int): Additional cost per bit of complexity.
         """
-        self.input = input
-        self.output = output
-        self.cost = cost
-        self.prob = prob
-        self.energy_yield = energy_yield
-        self.tolerance = tolerance if tolerance else {}
+        self.mask = mask
+        self.cost_base = cost_base
+        self.cost_per_bit = cost_per_bit
+        self._recalculate_cost()
 
-    def can_react(self, chemistry, energy):
+    def _recalculate_cost(self):
+        self.complexity = bit_count(self.mask)
+        self.cost = self.cost_base + (self.complexity * self.cost_per_bit)
+
+    def process(self, molecule):
         """
-        Checks if the reaction can be performed given the available chemistry and energy.
-
+        Attempts to metabolize a molecule.
+        
         Args:
-            chemistry (dict): The current chemical composition of the environment/cell.
-            energy (float): The current energy available to the cell.
-
+            molecule (int): The 8-bit chemical input.
+            
         Returns:
-            bool: True if the cell has enough energy (>= cost) and all required input chemicals.
+            dict: Result containing 'net_energy', 'waste', 'success'.
         """
-        if energy < self.cost:
-            return False
-
-        for mol, cant in self.input.items():
-            if chemistry.get(mol,0) < cant:
-                return False
-        return True
-
-    def reaction(self, chemistry, energy):
-        """
-        Executes the metabolic reaction defined by this gene.
-
-        If the reaction succeeds (based on the gene's probability), inputs are consumed
-        and outputs/energy yield are added. The energy cost is always subtracted.
-
-        Args:
-            chemistry (dict): The chemical composition to modify.
-            energy (float): The current energy of the cell.
-
-        Returns:
-            float: The new energy level after the reaction attempt.
-        """
-        if random.random() > self.prob:
-            return energy - self.cost
-        for mol, cant in self.input.items():
-            chemistry[mol] -= cant
-        for mol, cant in self.output.items():
-            chemistry[mol] = chemistry.get(mol, 0) + cant
-        return energy - self.cost + self.energy_yield
+        # 1. Reaction (Lock and Key)
+        extracted = molecule & self.mask
+        
+        # 2. Energy Potential
+        # Each bit extracted yields 20 units of energy
+        energy_bits = bit_count(extracted)
+        gross_energy = energy_bits * 20
+        
+        # 3. Waste Product
+        # Waste is what was left of the molecule after extraction
+        waste = molecule ^ extracted
+        
+        # 4. Net Gain
+        net_energy = gross_energy - self.cost
+        
+        return {
+            "input": molecule,
+            "mask": self.mask,
+            "extracted_bits": extracted,
+            "waste": waste,
+            "gross_energy": gross_energy,
+            "cost": self.cost,
+            "net_energy": net_energy,
+            "success": net_energy > 0
+        }
 
     def get_id(self):
-        """
-        Returns a stable string representation of the gene's functional logic.
-
-        This ID is used to compare genes and identify unique genetic traits.
-        The ID is deterministic by sorting inputs, outputs, and tolerances.
-
-        Returns:
-            str: A string uniquely identifying this gene's logic.
-        """
-        # Sort inputs and outputs to ensure deterministic string
-        inputs = sorted(self.input.items())
-        outputs = sorted(self.output.items())
-        tolerances = sorted(self.tolerance.items())
-        return f"in:{inputs}|out:{outputs}|cost:{self.cost:.4f}|yield:{self.energy_yield:.4f}|tol:{tolerances}"
+        """Unique ID based on mask and cost configuration."""
+        return f"M{self.mask:02X}-C{self.cost}"
 
     def __repr__(self):
-        """
-        Returns a human-readable string representation of the Gen instance.
-
-        Returns:
-            str: A formatted string showing the gene's inputs, outputs, cost, and yield.
-        """
-        # Format dictionary values if they are floats
-        def fmt_dict(d):
-            return {k: round(v, 2) for k, v in d.items()}
-            
-        return f"Gen(in={fmt_dict(self.input)}, out={fmt_dict(self.output)}, cost={self.cost:.2f}, yield={self.energy_yield:.2f})"
+        return f"Gen(mask={self.mask:08b}, cost={self.cost})"

@@ -27,22 +27,32 @@ class Genoma:
         if not self.genes:
             return
 
-        # 1. Point Mutation (Most common)
         for gene in self.genes:
-            if random.random() < 0.08: # 8% chance per gene to tweak cost
-                 gene.cost = max(0.1, gene.cost + random.uniform(-0.1, 0.1))
+            # 1. Point Mutation in Mask (Flip bits)
+            if random.random() < 0.1: # 10% chance per gene to mutate mask
+                # Flip 1 random bit in the 8-bit mask (0-7)
+                bit_to_flip = 1 << random.randint(0, 7)
+                gene.mask ^= bit_to_flip
+                gene._recalculate_cost()
             
-            if random.random() < 0.05: # 5% chance per gene to tweak prob
-                gene.prob = min(1.0, max(0.1, gene.prob + random.uniform(-0.1, 0.1)))
+            # 2. Mutate Cost Base
+            if random.random() < 0.05: # 5% chance
+                # Small integer change (-1, 0, +1)
+                change = random.randint(-1, 1)
+                gene.cost_base = max(1, gene.cost_base + change)
+                gene._recalculate_cost()
 
         # 2. Gene Duplication (Rare)
-        if random.random() < 0.05: # % chance
+        if random.random() < 0.02: # 2% chance
             target = random.choice(self.genes)
-            # Create a shallow copy (or deep if needed, but new instance is safer)
             import copy
             new_gen = copy.deepcopy(target)
+            # Add slight variation to duplicate immediately to avoid redundancy
+            if random.random() < 0.5:
+                 new_gen.mask ^= (1 << random.randint(0, 7))
+                 new_gen._recalculate_cost()
             self.genes.append(new_gen)
 
-        # 3. Gene Deletion (Very Rare, dangerous)
+        # 3. Gene Deletion (Very Rare)
         if len(self.genes) > 1 and random.random() < 0.01: # 1% chance
             self.genes.pop(random.randint(0, len(self.genes)-1))
